@@ -194,14 +194,29 @@ fn match_pattern(pattern: &Pattern, value: &Value, bindings: &mut HashMap<String
 }
 
 fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
+    match eval_with_tail(expr, env, true)? {
+        EvalOutcome::Value(v) => Ok(v),
+        EvalOutcome::TailCall(callee, args) => apply(callee, args),
+    }
+}
+
+enum EvalOutcome {
+    Value(Value),
+    TailCall(Value, Vec<Value>),
+}
+
+fn eval_with_tail(expr: &Expr, env: &Env, tail_position: bool) -> Result<EvalOutcome, String> {
     match expr {
-        Expr::Number(n) => Ok(Value::Number(*n)),
-        Expr::Bool(b) => Ok(Value::Bool(*b)),
-        Expr::Atom(a) => Ok(Value::Atom(a.clone())),
-        Expr::Symbol(s) => env.get(s).ok_or_else(|| format!("undefined symbol: {}", s)),
+        Expr::Number(n) => Ok(EvalOutcome::Value(Value::Number(*n))),
+        Expr::Bool(b) => Ok(EvalOutcome::Value(Value::Bool(*b))),
+        Expr::Atom(a) => Ok(EvalOutcome::Value(Value::Atom(a.clone()))),
+        Expr::Symbol(s) => Ok(EvalOutcome::Value(
+            env.get(s)
+                .ok_or_else(|| format!("undefined symbol: {}", s))?,
+        )),
         Expr::List(items) => {
             if items.is_empty() {
-                return Ok(Value::Nil);
+                return Ok(EvalOutcome::Value(Value::Nil));
             }
             match &items[0] {
                 Expr::Symbol(op) if op == "def" => {
@@ -214,7 +229,7 @@ fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
                     };
                     let value = eval(&items[2], env)?;
                     env.set(name, value.clone());
-                    Ok(value)
+                    Ok(EvalOutcome::Value(value))
                 }
                 Expr::Symbol(op) if op == "let" => {
                     if items.len() != 4 {
@@ -227,7 +242,7 @@ fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
                     let value = eval(&items[2], env)?;
                     let child = env.child();
                     child.set(name, value);
-                    eval(&items[3], &child)
+                    eval_with_tail(&items[3], &child, tail_position)
                 }
                 Expr::Symbol(op) if op == "if" => {
                     if items.len() != 4 {
@@ -235,9 +250,9 @@ fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
                     }
                     let cond = eval(&items[1], env)?;
                     if matches!(cond, Value::Bool(true)) {
-                        eval(&items[2], env)
+                        eval_with_tail(&items[2], env, tail_position)
                     } else {
-                        eval(&items[3], env)
+                        eval_with_tail(&items[3], env, tail_position)
                     }
                 }
                 Expr::Symbol(op) if op == "fn" => {
@@ -253,10 +268,10 @@ fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
                             _ => return Err("fn clause must be (pattern body)".to_string()),
                         }
                     }
-                    Ok(Value::Func(UserFunc {
+                    Ok(EvalOutcome::Value(Value::Func(UserFunc {
                         clauses,
                         env: env.clone(),
-                    }))
+                    })))
                 }
                 Expr::Symbol(op) if op == "|>" => {
                     if items.len() < 3 {
@@ -274,7 +289,7 @@ fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
                             _ => return Err("pipeline stage must be non-empty list".to_string()),
                         }
                     }
-                    Ok(current)
+                    Ok(EvalOutcome::Value(current))
                 }
                 _ => {
                     let callee = eval(&items[0], env)?;
@@ -282,7 +297,11 @@ fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
                     for arg in &items[1..] {
                         args.push(eval(arg, env)?);
                     }
-                    apply(callee, args)
+                    if tail_position {
+                        Ok(EvalOutcome::TailCall(callee, args))
+                    } else {
+                        Ok(EvalOutcome::Value(apply(callee, args)?))
+                    }
                 }
             }
         }
@@ -306,26 +325,42 @@ fn expr_from_value(value: Value) -> Result<Expr, String> {
 }
 
 fn apply(callee: Value, args: Vec<Value>) -> Result<Value, String> {
-    match callee {
-        Value::Builtin(f) => f(args),
-        Value::Func(func) => {
-            if args.len() != 1 {
-                return Err("user function expects exactly one argument".to_string());
-            }
-            let arg = &args[0];
-            for clause in &func.clauses {
-                let mut bindings = HashMap::new();
-                if match_pattern(&clause.pattern, arg, &mut bindings) {
-                    let local = func.env.child();
-                    for (k, v) in bindings {
-                        local.set(&k, v);
+    let mut callee = callee;
+    let mut args = args;
+
+    loop {
+        match callee.clone() {
+            Value::Builtin(f) => return f(args),
+            Value::Func(func) => {
+                if args.len() != 1 {
+                    return Err("user function expects exactly one argument".to_string());
+                }
+                let arg = &args[0];
+                let mut matched = false;
+                for clause in &func.clauses {
+                    let mut bindings = HashMap::new();
+                    if match_pattern(&clause.pattern, arg, &mut bindings) {
+                        let local = func.env.child();
+                        for (k, v) in bindings {
+                            local.set(&k, v);
+                        }
+                        matched = true;
+                        match eval_with_tail(&clause.body, &local, true)? {
+                            EvalOutcome::Value(v) => return Ok(v),
+                            EvalOutcome::TailCall(next_callee, next_args) => {
+                                callee = next_callee;
+                                args = next_args;
+                            }
+                        }
+                        break;
                     }
-                    return eval(&clause.body, &local);
+                }
+                if !matched {
+                    return Err("no function clause matched".to_string());
                 }
             }
-            Err("no function clause matched".to_string())
+            _ => return Err("attempted to call non-function".to_string()),
         }
-        _ => Err("attempted to call non-function".to_string()),
     }
 }
 
@@ -449,5 +484,20 @@ mod tests {
         let code = "(|> 5 (+ 3) (* 2))";
         let value = run_program(code, &env).unwrap();
         assert!(matches!(value, Value::Number(16)));
+    }
+
+    #[test]
+    fn deep_tail_recursion_works() {
+        let env = setup();
+        let code = r#"
+(def count-down
+  (fn
+    (0 0)
+    (n (count-down (- n 1)))))
+
+(count-down 50000)
+"#;
+        let value = run_program(code, &env).unwrap();
+        assert!(matches!(value, Value::Number(0)));
     }
 }
