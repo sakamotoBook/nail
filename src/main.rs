@@ -14,6 +14,23 @@ enum Value {
     Nil,
 }
 
+fn value_structural_eq(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => x == y,
+        (Value::Bool(x), Value::Bool(y)) => x == y,
+        (Value::Atom(x), Value::Atom(y)) => x == y,
+        (Value::Nil, Value::Nil) => true,
+        (Value::List(xs), Value::List(ys)) => {
+            xs.len() == ys.len()
+                && xs
+                    .iter()
+                    .zip(ys.iter())
+                    .all(|(x, y)| value_structural_eq(x, y))
+        }
+        _ => false,
+    }
+}
+
 #[derive(Clone)]
 struct UserFunc {
     clauses: Vec<Clause>,
@@ -172,8 +189,12 @@ fn match_pattern(pattern: &Pattern, value: &Value, bindings: &mut HashMap<String
     match (pattern, value) {
         (Pattern::Wildcard, _) => true,
         (Pattern::Var(name), v) => {
-            bindings.insert(name.clone(), v.clone());
-            true
+            if let Some(existing) = bindings.get(name) {
+                value_structural_eq(existing, v)
+            } else {
+                bindings.insert(name.clone(), v.clone());
+                true
+            }
         }
         (Pattern::Number(a), Value::Number(b)) => a == b,
         (Pattern::Bool(a), Value::Bool(b)) => a == b,
@@ -281,10 +302,12 @@ fn eval_with_tail(expr: &Expr, env: &Env, tail_position: bool) -> Result<EvalOut
                     for stage in &items[2..] {
                         match stage {
                             Expr::List(call) if !call.is_empty() => {
-                                let mut full = vec![call[0].clone()];
-                                full.push(expr_from_value(current.clone())?);
-                                full.extend_from_slice(&call[1..]);
-                                current = eval(&Expr::List(full), env)?;
+                                let callee = eval(&call[0], env)?;
+                                let mut args = vec![current];
+                                for arg in &call[1..] {
+                                    args.push(eval(arg, env)?);
+                                }
+                                current = apply(callee, args)?;
                             }
                             _ => return Err("pipeline stage must be non-empty list".to_string()),
                         }
@@ -305,22 +328,6 @@ fn eval_with_tail(expr: &Expr, env: &Env, tail_position: bool) -> Result<EvalOut
                 }
             }
         }
-    }
-}
-
-fn expr_from_value(value: Value) -> Result<Expr, String> {
-    match value {
-        Value::Number(n) => Ok(Expr::Number(n)),
-        Value::Bool(b) => Ok(Expr::Bool(b)),
-        Value::Atom(a) => Ok(Expr::Atom(a)),
-        Value::List(items) => {
-            let mut exprs = Vec::new();
-            for i in items {
-                exprs.push(expr_from_value(i)?);
-            }
-            Ok(Expr::List(exprs))
-        }
-        _ => Err("pipeline can only forward literal values".to_string()),
     }
 }
 
@@ -371,7 +378,11 @@ fn register_builtins(env: &Env) {
     );
     env.set(
         "-",
-        Value::Builtin(|args| numeric_fold(args, 0, |a, b| a - b)),
+        Value::Builtin(|args| match args.as_slice() {
+            [] => Ok(Value::Number(0)),
+            [Value::Number(n)] => Ok(Value::Number(-n)),
+            [..] => numeric_fold(args, 0, |a, b| a - b),
+        }),
     );
     env.set(
         "*",
@@ -499,5 +510,36 @@ mod tests {
 "#;
         let value = run_program(code, &env).unwrap();
         assert!(matches!(value, Value::Number(0)));
+    }
+
+    #[test]
+    fn pipeline_can_pass_list_values() {
+        let env = setup();
+        let code = "(|> (list 1 2 3) (tail) (head))";
+        let value = run_program(code, &env).unwrap();
+        assert!(matches!(value, Value::Number(2)));
+    }
+
+    #[test]
+    fn duplicate_pattern_variables_must_match_same_value() {
+        let env = setup();
+        let code = r#"
+(def same-pair
+  (fn
+    ((x x) :ok)
+    (_ :ng)))
+
+(same-pair (list 1 2))
+"#;
+        let value = run_program(code, &env).unwrap();
+        assert!(matches!(value, Value::Atom(ref a) if a == "ng"));
+    }
+
+    #[test]
+    fn unary_minus_works() {
+        let env = setup();
+        let code = "(- 5)";
+        let value = run_program(code, &env).unwrap();
+        assert!(matches!(value, Value::Number(-5)));
     }
 }
