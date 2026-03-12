@@ -148,14 +148,10 @@ fn apply(callee: Value, args: Vec<Value>) -> Result<Value, String> {
         match callee.clone() {
             Value::Builtin(f) => return f(args),
             Value::Func(func) => {
-                if args.len() != 1 {
-                    return Err("user function expects exactly one argument".to_string());
-                }
-                let arg = &args[0];
                 let mut matched = false;
                 for clause in &func.clauses {
                     let mut bindings = HashMap::new();
-                    if match_pattern(&clause.pattern, arg, &mut bindings) {
+                    if match_clause_args(&clause.pattern, &args, &mut bindings) {
                         let local = func.env.child();
                         for (k, v) in bindings {
                             local.set(&k, v);
@@ -209,5 +205,27 @@ fn match_pattern(pattern: &Pattern, value: &Value, bindings: &mut HashMap<String
             Value::Nil if items.is_empty() => true,
             _ => false,
         },
+    }
+}
+
+fn match_clause_args(
+    pattern: &Pattern,
+    args: &[Value],
+    bindings: &mut HashMap<String, Value>,
+) -> bool {
+    if args.len() == 1 {
+        return match_pattern(pattern, &args[0], bindings);
+    }
+
+    match pattern {
+        Pattern::List(items) if items.len() == args.len() => {
+            for (item, arg) in items.iter().zip(args.iter()) {
+                if !match_pattern(item, arg, bindings) {
+                    return false;
+                }
+            }
+            true
+        }
+        _ => false,
     }
 }
