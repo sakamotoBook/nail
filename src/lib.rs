@@ -107,6 +107,28 @@ mod tests {
     }
 
     #[test]
+    fn empty_list_literal_and_list_builtin_are_nil() {
+        let env = setup();
+        let code = "(list () (list))";
+        let value = run_program(code, &env).unwrap();
+        assert!(matches!(
+            value,
+            Value::List(ref values)
+                if values.len() == 2
+                    && matches!(values[0], Value::Nil)
+                    && matches!(values[1], Value::Nil)
+        ));
+    }
+
+    #[test]
+    fn tail_of_singleton_list_is_nil() {
+        let env = setup();
+        let code = "(tail (list 1))";
+        let value = run_program(code, &env).unwrap();
+        assert!(matches!(value, Value::Nil));
+    }
+
+    #[test]
     fn nil_pattern_matches_nil_literal_and_empty_list() {
         let env = setup();
         let code = r#"

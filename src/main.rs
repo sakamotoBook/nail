@@ -72,7 +72,8 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     match args.as_slice() {
-        [_] => match run_program(DEMO, &env) {
+        [_] => run_repl(),
+        [_, flag] if flag == "--demo" => match run_program(DEMO, &env) {
             Ok(v) => println!("=> {}", v),
             Err(e) => eprintln!("error: {}", e),
         },
@@ -84,6 +85,6 @@ fn main() {
             },
             Err(e) => eprintln!("error: failed to read {}: {}", path, e),
         },
-        _ => eprintln!("usage: cargo run -- [--repl | path/to/program.nail]"),
+        _ => eprintln!("usage: cargo run -- [--repl | --demo | path/to/program.nail]"),
     }
 }
