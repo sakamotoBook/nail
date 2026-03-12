@@ -151,6 +151,36 @@ mod tests {
     }
 
     #[test]
+    fn user_function_can_take_multiple_arguments() {
+        let env = setup();
+        let code = r#"
+(def sum3
+  (fn
+    ((a b c) (+ a b c))))
+
+(sum3 1 2 3)
+"#;
+
+        let value = run_program(code, &env).unwrap();
+        assert!(matches!(value, Value::Number(6)));
+    }
+
+    #[test]
+    fn single_argument_list_pattern_still_works() {
+        let env = setup();
+        let code = r#"
+(def sum-pair
+  (fn
+    ((a b) (+ a b))))
+
+(sum-pair (list 2 5))
+"#;
+
+        let value = run_program(code, &env).unwrap();
+        assert!(matches!(value, Value::Number(7)));
+    }
+
+    #[test]
     fn parser_error_contains_position() {
         let env = setup();
         let error = match run_program("(+ 1", &env) {
