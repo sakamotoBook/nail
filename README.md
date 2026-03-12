@@ -13,20 +13,44 @@
 
 - ユーザー定義関数は **単一引数**（必要なら `(list ...)` で束ねて渡す）。
 - `if` の条件は `true` のみ真として扱う（それ以外は偽）。
-- `()` は `nil` として評価される。空リスト値は `(list)` で作る。
+- `nil` リテラルをサポート。`()` も `nil` として評価される。
 - `|>` は値をそのまま次段へ渡すため、リスト値も安全にパイプできる。
 - `-` は 0 引数で `0`、1 引数で単項マイナス、2 引数以上で左結合減算。
 
 ## 実行
 
+デモを実行:
+
 ```bash
 cargo run
 ```
 
-`src/main.rs` 内のデモコードが実行されます。
+REPL を起動:
+
+```bash
+cargo run -- --repl
+```
+
+ファイルを実行:
+
+```bash
+cargo run -- examples/sample.nail
+```
 
 ## テスト
 
 ```bash
 cargo test
 ```
+
+## CI
+
+GitHub Actions で以下を実行します。
+
+- `cargo fmt --all -- --check`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo test --all-targets`
+
+## ライセンス
+
+MIT License (`LICENSE`)。
