@@ -15,6 +15,10 @@ pub enum Value {
 }
 
 fn value_structural_eq(a: &Value, b: &Value) -> bool {
+    if is_nil_like(a) && is_nil_like(b) {
+        return true;
+    }
+
     match (a, b) {
         (Value::Number(x), Value::Number(y)) => x == y,
         (Value::Bool(x), Value::Bool(y)) => x == y,
@@ -29,6 +33,10 @@ fn value_structural_eq(a: &Value, b: &Value) -> bool {
         }
         _ => false,
     }
+}
+
+fn is_nil_like(value: &Value) -> bool {
+    matches!(value, Value::Nil) || matches!(value, Value::List(items) if items.is_empty())
 }
 
 #[derive(Clone)]
@@ -214,6 +222,7 @@ fn match_pattern(pattern: &Pattern, value: &Value, bindings: &mut HashMap<String
                 }
                 true
             }
+            Value::Nil if items.is_empty() => true,
             _ => false,
         },
     }
@@ -550,5 +559,27 @@ mod tests {
         let code = "nil";
         let value = run_program(code, &env).unwrap();
         assert!(matches!(value, Value::Nil));
+    }
+
+    #[test]
+    fn nil_pattern_matches_nil_literal_and_empty_list() {
+        let env = setup();
+        let code = r#"
+(def is-empty
+  (fn
+    (nil :ok)
+    (_ :ng)))
+
+(list (is-empty nil) (is-empty (list)))
+"#;
+
+        let value = run_program(code, &env).unwrap();
+        assert!(matches!(
+            value,
+            Value::List(ref values)
+                if values.len() == 2
+                    && matches!(values[0], Value::Atom(ref atom) if atom == "ok")
+                    && matches!(values[1], Value::Atom(ref atom) if atom == "ok")
+        ));
     }
 }
