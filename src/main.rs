@@ -26,8 +26,11 @@ fn run_repl() {
     println!("nail REPL (Ctrl-D で終了)");
 
     let stdin = io::stdin();
+    let mut buffer = String::new();
+    let mut balance = 0_i32;
     loop {
-        print!("> ");
+        let prompt = if balance == 0 { "> " } else { "... " };
+        print!("{}", prompt);
         let _ = io::stdout().flush();
 
         let mut line = String::new();
@@ -35,13 +38,26 @@ fn run_repl() {
             Ok(0) => break,
             Ok(_) => {
                 let src = line.trim();
-                if src.is_empty() {
+                if src.is_empty() && balance == 0 {
                     continue;
                 }
-                match run_program(src, &env) {
+
+                balance += src.chars().filter(|c| *c == '(').count() as i32;
+                balance -= src.chars().filter(|c| *c == ')').count() as i32;
+
+                buffer.push_str(src);
+                buffer.push('\n');
+
+                if balance > 0 {
+                    continue;
+                }
+
+                match run_program(&buffer, &env) {
                     Ok(v) => println!("=> {}", v),
                     Err(e) => eprintln!("error: {}", e),
                 }
+                buffer.clear();
+                balance = 0;
             }
             Err(e) => {
                 eprintln!("error: failed to read input: {}", e);
