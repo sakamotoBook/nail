@@ -1,6 +1,7 @@
 use std::fmt;
 
 use crate::env::Env;
+use crate::error::NailError;
 
 #[derive(Clone)]
 pub enum Value {
@@ -9,7 +10,7 @@ pub enum Value {
     Atom(String),
     List(Vec<Value>),
     Func(UserFunc),
-    Builtin(fn(Vec<Value>) -> Result<Value, String>),
+    Builtin(fn(Vec<Value>) -> Result<Value, NailError>),
     Nil,
 }
 

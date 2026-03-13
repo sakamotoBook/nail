@@ -1,11 +1,13 @@
 mod ast;
 mod builtins;
 mod env;
+mod error;
 mod eval;
 mod parser;
 
 pub use ast::Value;
 pub use env::Env;
+pub use error::NailError;
 
 use builtins::register_builtins;
 use eval::eval;
@@ -17,7 +19,7 @@ pub fn default_env() -> Env {
     env
 }
 
-pub fn run_program(code: &str, env: &Env) -> Result<Value, String> {
+pub fn run_program(code: &str, env: &Env) -> Result<Value, NailError> {
     let mut last = Value::Nil;
     for expr in parse_all(code)? {
         last = eval(&expr, env)?;
@@ -187,6 +189,48 @@ mod tests {
             Ok(value) => panic!("expected parser error, got value: {}", value),
             Err(error) => error,
         };
-        assert!(error.contains("line 1, col 1"));
+        assert!(error.to_string().contains("line 1, col 1"));
+    }
+
+    #[test]
+    fn closure_observes_redefinition_in_captured_frame() {
+        let env = setup();
+        let code = r#"
+(def x 10)
+(def get-x (fn (_ x)))
+(def x 20)
+(get-x nil)
+"#;
+
+        let value = run_program(code, &env).unwrap();
+        assert!(matches!(value, Value::Number(20)));
+    }
+
+    #[test]
+    fn let_is_not_letrec_for_local_function_binding() {
+        let env = setup();
+        let code = r#"
+(let f
+  (fn
+    (0 0)
+    (n (f (- n 1))))
+  (f 3))
+"#;
+
+        let error = match run_program(code, &env) {
+            Ok(value) => panic!("expected error, got value: {}", value),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("undefined symbol: f"));
+    }
+
+    #[test]
+    fn builtin_errors_are_typed() {
+        let env = setup();
+        let err = match run_program("(head nil)", &env) {
+            Ok(value) => panic!("expected error, got value: {}", value),
+            Err(error) => error,
+        };
+        assert!(matches!(err, NailError::Builtin(_)));
     }
 }

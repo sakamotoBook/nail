@@ -1,5 +1,6 @@
 use crate::ast::Value;
 use crate::env::Env;
+use crate::error::NailError;
 
 pub(crate) fn register_builtins(env: &Env) {
     env.set(
@@ -32,7 +33,7 @@ pub(crate) fn register_builtins(env: &Env) {
         "head",
         Value::Builtin(|args| match args.as_slice() {
             [Value::List(v)] if !v.is_empty() => Ok(v[0].clone()),
-            _ => Err("head expects non-empty list".to_string()),
+            _ => Err(NailError::builtin("head expects non-empty list")),
         }),
     );
     env.set(
@@ -45,7 +46,7 @@ pub(crate) fn register_builtins(env: &Env) {
                     Ok(Value::List(v[1..].to_vec()))
                 }
             }
-            _ => Err("tail expects non-empty list".to_string()),
+            _ => Err(NailError::builtin("tail expects non-empty list")),
         }),
     );
     env.set(
@@ -59,19 +60,19 @@ pub(crate) fn register_builtins(env: &Env) {
     );
 }
 
-fn numeric_fold(args: Vec<Value>, seed: i64, op: fn(i64, i64) -> i64) -> Result<Value, String> {
+fn numeric_fold(args: Vec<Value>, seed: i64, op: fn(i64, i64) -> i64) -> Result<Value, NailError> {
     if args.is_empty() {
         return Ok(Value::Number(seed));
     }
     let mut iter = args.into_iter();
     let mut acc = match iter.next() {
         Some(Value::Number(n)) => n,
-        _ => return Err("numeric operation requires numbers".to_string()),
+        _ => return Err(NailError::builtin("numeric operation requires numbers")),
     };
     for value in iter {
         let n = match value {
             Value::Number(n) => n,
-            _ => return Err("numeric operation requires numbers".to_string()),
+            _ => return Err(NailError::builtin("numeric operation requires numbers")),
         };
         acc = op(acc, n);
     }

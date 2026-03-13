@@ -1,4 +1,5 @@
 use crate::ast::{Expr, Pattern};
+use crate::error::NailError;
 
 #[derive(Clone)]
 struct Token {
@@ -82,7 +83,7 @@ fn tokenize(input: &str) -> Vec<Token> {
     tokens
 }
 
-pub(crate) fn parse_all(input: &str) -> Result<Vec<Expr>, String> {
+pub(crate) fn parse_all(input: &str) -> Result<Vec<Expr>, NailError> {
     let tokens = tokenize(input);
     let mut pos = 0;
     let mut exprs = Vec::new();
@@ -92,10 +93,10 @@ pub(crate) fn parse_all(input: &str) -> Result<Vec<Expr>, String> {
     Ok(exprs)
 }
 
-fn parse_expr(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
+fn parse_expr(tokens: &[Token], pos: &mut usize) -> Result<Expr, NailError> {
     let token = tokens
         .get(*pos)
-        .ok_or_else(|| "unexpected end of input".to_string())?;
+        .ok_or_else(|| NailError::parse("unexpected end of input"))?;
     *pos += 1;
     match token.lexeme.as_str() {
         "(" => {
@@ -104,12 +105,18 @@ fn parse_expr(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
                 list.push(parse_expr(tokens, pos)?);
             }
             if *pos >= tokens.len() {
-                return Err(format!("missing ')' started at {}", token.at()));
+                return Err(NailError::parse(format!(
+                    "missing ')' started at {}",
+                    token.at()
+                )));
             }
             *pos += 1;
             Ok(Expr::List(list))
         }
-        ")" => Err(format!("unexpected ')' at {}", token.at())),
+        ")" => Err(NailError::parse(format!(
+            "unexpected ')' at {}",
+            token.at()
+        ))),
         "true" => Ok(Expr::Bool(true)),
         "false" => Ok(Expr::Bool(false)),
         "nil" => Ok(Expr::Nil),
@@ -126,7 +133,7 @@ fn parse_expr(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
     }
 }
 
-pub(crate) fn pattern_from_expr(expr: &Expr) -> Result<Pattern, String> {
+pub(crate) fn pattern_from_expr(expr: &Expr) -> Result<Pattern, NailError> {
     match expr {
         Expr::Symbol(s) if s == "_" => Ok(Pattern::Wildcard),
         Expr::Symbol(s) => Ok(Pattern::Var(s.clone())),
