@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::ast::{Clause, Expr, Pattern, UserFunc, Value, value_structural_eq};
 use crate::env::Env;
+use crate::error::NailError;
 use crate::parser::pattern_from_expr;
 
 enum EvalOutcome {
@@ -9,14 +10,14 @@ enum EvalOutcome {
     TailCall(Value, Vec<Value>),
 }
 
-pub(crate) fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
+pub(crate) fn eval(expr: &Expr, env: &Env) -> Result<Value, NailError> {
     match eval_with_tail(expr, env, false)? {
         EvalOutcome::Value(v) => Ok(v),
         EvalOutcome::TailCall(callee, args) => apply(callee, args),
     }
 }
 
-fn eval_with_tail(expr: &Expr, env: &Env, tail_position: bool) -> Result<EvalOutcome, String> {
+fn eval_with_tail(expr: &Expr, env: &Env, tail_position: bool) -> Result<EvalOutcome, NailError> {
     match expr {
         Expr::Number(n) => Ok(EvalOutcome::Value(Value::Number(*n))),
         Expr::Bool(b) => Ok(EvalOutcome::Value(Value::Bool(*b))),
@@ -25,7 +26,7 @@ fn eval_with_tail(expr: &Expr, env: &Env, tail_position: bool) -> Result<EvalOut
         Expr::Symbol(s) => env
             .get(s)
             .map(EvalOutcome::Value)
-            .ok_or_else(|| format!("undefined symbol: {}", s)),
+            .ok_or_else(|| NailError::eval(format!("undefined symbol: {}", s))),
         Expr::List(items) => {
             if items.is_empty() {
                 return Ok(EvalOutcome::Value(Value::Nil));
@@ -35,11 +36,11 @@ fn eval_with_tail(expr: &Expr, env: &Env, tail_position: bool) -> Result<EvalOut
                 match op.as_str() {
                     "def" => {
                         if items.len() != 3 {
-                            return Err("def expects (def name expr)".to_string());
+                            return Err(NailError::eval("def expects (def name expr)"));
                         }
                         let name = match &items[1] {
                             Expr::Symbol(s) => s.clone(),
-                            _ => return Err("def name must be symbol".to_string()),
+                            _ => return Err(NailError::eval("def name must be symbol")),
                         };
                         let value = eval(&items[2], env)?;
                         env.set(&name, value.clone());
@@ -47,7 +48,7 @@ fn eval_with_tail(expr: &Expr, env: &Env, tail_position: bool) -> Result<EvalOut
                     }
                     "if" => {
                         if items.len() != 4 {
-                            return Err("if expects (if cond then else)".to_string());
+                            return Err(NailError::eval("if expects (if cond then else)"));
                         }
                         let cond = eval(&items[1], env)?;
                         let branch = if matches!(cond, Value::Bool(true)) {
@@ -59,11 +60,11 @@ fn eval_with_tail(expr: &Expr, env: &Env, tail_position: bool) -> Result<EvalOut
                     }
                     "let" => {
                         if items.len() != 4 {
-                            return Err("let expects (let name value body)".to_string());
+                            return Err(NailError::eval("let expects (let name value body)"));
                         }
                         let name = match &items[1] {
                             Expr::Symbol(s) => s.clone(),
-                            _ => return Err("let name must be symbol".to_string()),
+                            _ => return Err(NailError::eval("let name must be symbol")),
                         };
                         let value = eval(&items[2], env)?;
                         let local = env.child();
@@ -72,16 +73,16 @@ fn eval_with_tail(expr: &Expr, env: &Env, tail_position: bool) -> Result<EvalOut
                     }
                     "fn" => {
                         if items.len() < 2 {
-                            return Err("fn expects at least one clause".to_string());
+                            return Err(NailError::eval("fn expects at least one clause"));
                         }
                         let mut clauses = Vec::new();
                         for clause_expr in &items[1..] {
                             let clause_items = match clause_expr {
                                 Expr::List(v) => v,
-                                _ => return Err("fn clause must be list".to_string()),
+                                _ => return Err(NailError::eval("fn clause must be list")),
                             };
                             if clause_items.len() != 2 {
-                                return Err("fn clause expects (pattern body)".to_string());
+                                return Err(NailError::eval("fn clause expects (pattern body)"));
                             }
                             let pattern = pattern_from_expr(&clause_items[0])?;
                             let body = clause_items[1].clone();
@@ -94,7 +95,7 @@ fn eval_with_tail(expr: &Expr, env: &Env, tail_position: bool) -> Result<EvalOut
                     }
                     "|>" => {
                         if items.len() < 3 {
-                            return Err("|> expects at least (|> value step)".to_string());
+                            return Err(NailError::eval("|> expects at least (|> value step)"));
                         }
                         let mut acc = eval(&items[1], env)?;
                         for (idx, step) in items[2..].iter().enumerate() {
@@ -140,7 +141,7 @@ fn eval_with_tail(expr: &Expr, env: &Env, tail_position: bool) -> Result<EvalOut
     }
 }
 
-fn apply(callee: Value, args: Vec<Value>) -> Result<Value, String> {
+fn apply(callee: Value, args: Vec<Value>) -> Result<Value, NailError> {
     let mut callee = callee;
     let mut args = args;
 
@@ -168,10 +169,10 @@ fn apply(callee: Value, args: Vec<Value>) -> Result<Value, String> {
                     }
                 }
                 if !matched {
-                    return Err("no function clause matched".to_string());
+                    return Err(NailError::eval("no function clause matched"));
                 }
             }
-            _ => return Err("attempted to call non-function".to_string()),
+            _ => return Err(NailError::eval("attempted to call non-function")),
         }
     }
 }
